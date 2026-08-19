@@ -171,6 +171,11 @@ export class GameLab {
       backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
+      // Visual regression tests read the rendered canvas directly. Retaining
+      // the buffer only in explicit test mode keeps captures deterministic
+      // without changing the production renderer's memory behavior.
+      preserveDrawingBuffer:
+        new URLSearchParams(window.location.search).get("testMode") === "1",
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       preference: "webgl",
       powerPreference: "high-performance",

@@ -13,13 +13,14 @@ async function openFixed(page: Page, query: string): Promise<void> {
 }
 
 async function captureElement(locator: Locator): Promise<Buffer> {
-  await locator.scrollIntoViewIfNeeded();
-  const clip = await locator.boundingBox();
-  if (clip === null) throw new Error("Visual target has no bounding box");
-  // A clipped page capture avoids Locator.screenshot's stability wait. Pixi's
-  // resize observer can keep the canvas element active under SwiftShader even
-  // when the deterministic scene itself is paused and pixel-stable.
-  return locator.page().screenshot({ animations: "disabled", clip });
+  const encoded = await locator.locator("canvas").evaluate((canvas) => {
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      throw new Error("Visual target does not contain a canvas");
+    }
+    return canvas.toDataURL("image/png").split(",", 2)[1];
+  });
+  if (encoded === undefined) throw new Error("Canvas PNG encoding failed");
+  return Buffer.from(encoded, "base64");
 }
 
 async function expectStableImage(locator: Locator, name: string): Promise<void> {

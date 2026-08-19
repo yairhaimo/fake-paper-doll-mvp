@@ -12,14 +12,24 @@ async function openFixed(page: Page, query: string): Promise<void> {
   await page.waitForTimeout(350);
 }
 
+async function captureElement(locator: Locator): Promise<Buffer> {
+  await locator.scrollIntoViewIfNeeded();
+  const clip = await locator.boundingBox();
+  if (clip === null) throw new Error("Visual target has no bounding box");
+  // A clipped page capture avoids Locator.screenshot's stability wait. Pixi's
+  // resize observer can keep the canvas element active under SwiftShader even
+  // when the deterministic scene itself is paused and pixel-stable.
+  return locator.page().screenshot({ animations: "disabled", clip });
+}
+
 async function expectStableImage(locator: Locator, name: string): Promise<void> {
   // Prime the WebGL readback once. Headless SwiftShader can expose a frame
   // before Pixi's text textures have reached the canvas on the first capture.
-  await locator.screenshot({ animations: "disabled" });
+  await captureElement(locator);
   await locator.evaluate(
     () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
   );
-  const image = await locator.screenshot({ animations: "disabled" });
+  const image = await captureElement(locator);
   expect(image).toMatchSnapshot(name, {
     maxDiffPixelRatio: 0.008,
     threshold: 0.2,
@@ -44,7 +54,7 @@ test("anchor and semantic-layer overlay remains aligned", async ({ page }) => {
 
 test("both facing directions share the same grounded root", async ({ page }) => {
   await openFixed(page, "animation=run&tick=17");
-  const right = await page.locator(".canvas-wrap").screenshot();
+  const right = await captureElement(page.locator(".canvas-wrap"));
   await page.evaluate(() => {
     window.__PAPER_DOLL__!.setFacing(-1);
     window.__PAPER_DOLL__!.setAnimation("run", 17);

@@ -63,8 +63,10 @@ test("movement, jump, fall, land, and attack complete through real input", async
     )
     .toBe("fall");
   await expect
-    .poll(() =>
-      page.evaluate(() => window.__PAPER_DOLL__!.getSnapshot().animation.animationId),
+    .poll(
+      () =>
+        page.evaluate(() => window.__PAPER_DOLL__!.getSnapshot().animation.animationId),
+      { intervals: [16] },
     )
     .toBe("land");
   await expect

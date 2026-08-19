@@ -1,6 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-test.setTimeout(180_000);
+// Raster readback through headless SwiftShader is deliberately slower than a
+// hardware-backed browser. Keep the visual gate strict without letting the
+// runner kill a capture while it is still producing mismatch evidence.
+test.setTimeout(360_000);
 
 async function openFixed(page: Page, query: string): Promise<void> {
   await page.goto(`/?testMode=1&paused=1&${query}`);

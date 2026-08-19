@@ -28,7 +28,11 @@ jobs:
       - run: npm run assets:check
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - name: Use runner Chrome for browser verification
+        run: |
+          CHROME_PATH="$(command -v google-chrome-stable || command -v google-chrome)"
+          test -n "$CHROME_PATH"
+          echo "CHROMIUM_EXECUTABLE_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
       - run: npm run test:e2e
       - run: npm run test:visual -- --retries=0
       - if: failure()

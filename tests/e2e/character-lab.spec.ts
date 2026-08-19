@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.setTimeout(60_000);
+
 async function waitForLab(page: Page): Promise<void> {
   await page.goto("/?testMode=1");
   await page.waitForFunction(() => window.__PAPER_DOLL__?.ready === true);

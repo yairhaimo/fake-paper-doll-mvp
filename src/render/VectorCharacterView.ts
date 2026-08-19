@@ -1,17 +1,22 @@
 import {
+  Assets,
   Container,
   Graphics,
   GraphicsContext,
   GraphicsPath,
+  Rectangle,
+  Sprite,
   Text,
   TextStyle,
+  Texture,
 } from "pixi.js";
 import type {
   AnchorName,
   CompositionResult,
   PaletteDefinition,
+  PieceDescriptor,
+  RasterPieceDescriptor,
   SemanticLayer,
-  VectorPieceDescriptor,
   VectorPrimitive,
 } from "../character/types";
 
@@ -48,6 +53,115 @@ const ANCHOR_COLORS: Readonly<Record<"body" | "limb" | "item", number>> = {
 };
 
 const contextCache = new Map<string, GraphicsContext>();
+
+interface CachedRasterTexture {
+  readonly texture: Texture;
+  /** Cropped textures are owned here; full-source textures remain Assets-owned. */
+  readonly owned: boolean;
+}
+
+const rasterTextureCache = new Map<string, CachedRasterTexture>();
+const rasterTexturePromises = new Map<string, Promise<Texture>>();
+const rasterTextureErrors = new Map<string, Error>();
+
+function rasterTextureKey(asset: RasterPieceDescriptor): string {
+  const crop = asset.sourceRect;
+  return crop === undefined
+    ? asset.source
+    : `${asset.source}|${crop.x},${crop.y},${crop.width},${crop.height}`;
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function getLoadedRasterTexture(asset: RasterPieceDescriptor): Texture | undefined {
+  return rasterTextureCache.get(rasterTextureKey(asset))?.texture;
+}
+
+async function loadRasterTexture(asset: RasterPieceDescriptor): Promise<Texture> {
+  const key = rasterTextureKey(asset);
+  const cached = rasterTextureCache.get(key);
+  if (cached !== undefined) return cached.texture;
+
+  const failed = rasterTextureErrors.get(key);
+  if (failed !== undefined) throw failed;
+
+  const inFlight = rasterTexturePromises.get(key);
+  if (inFlight !== undefined) return inFlight;
+
+  const load = Assets.load<Texture>(asset.source)
+    .then((sourceTexture) => {
+      if (!(sourceTexture instanceof Texture)) {
+        throw new Error(`Raster source ${asset.source} did not resolve to a Pixi Texture`);
+      }
+
+      const crop = asset.sourceRect;
+      const texture =
+        crop === undefined
+          ? sourceTexture
+          : new Texture({
+              source: sourceTexture.source,
+              frame: new Rectangle(crop.x, crop.y, crop.width, crop.height),
+              label: `${asset.id}:crop`,
+            });
+      rasterTextureCache.set(key, { texture, owned: crop !== undefined });
+      rasterTextureErrors.delete(key);
+      return texture;
+    })
+    .catch((error: unknown) => {
+      const normalized = asError(error);
+      rasterTextureErrors.set(key, normalized);
+      throw normalized;
+    })
+    .finally(() => {
+      rasterTexturePromises.delete(key);
+    });
+
+  rasterTexturePromises.set(key, load);
+  return load;
+}
+
+export interface RasterPreloadDiagnostics {
+  readonly loadedAssetIds: readonly string[];
+  readonly failedAssetIds: readonly string[];
+}
+
+/**
+ * Resolves every unique raster source/crop before the first synchronous render.
+ * Individual failures are reported instead of rejecting so callers can render
+ * their deterministic semantic fallback.
+ */
+export async function preloadRasterAssets(
+  assets: Iterable<PieceDescriptor>,
+): Promise<RasterPreloadDiagnostics> {
+  const descriptors: RasterPieceDescriptor[] = [];
+  const rasterAssets = new Map<string, RasterPieceDescriptor>();
+  for (const asset of assets) {
+    if (asset.kind === "raster") {
+      descriptors.push(asset);
+      rasterAssets.set(rasterTextureKey(asset), asset);
+    }
+  }
+  await Promise.allSettled(
+    [...rasterAssets.values()].map((asset) => loadRasterTexture(asset)),
+  );
+
+  const loadedAssetIds = new Set<string>();
+  const failedAssetIds = new Set<string>();
+  for (const asset of descriptors) {
+    if (getLoadedRasterTexture(asset) !== undefined) {
+      loadedAssetIds.add(asset.id);
+    } else {
+      failedAssetIds.add(asset.id);
+    }
+  }
+
+  return Object.freeze({
+    loadedAssetIds: Object.freeze([...loadedAssetIds].sort()),
+    failedAssetIds: Object.freeze([...failedAssetIds].sort()),
+  });
+}
 
 function paletteKey(palette: PaletteDefinition): string {
   return Object.entries(palette)
@@ -131,7 +245,7 @@ function appendPrimitive(
 }
 
 function buildContext(
-  asset: VectorPieceDescriptor,
+  asset: PieceDescriptor,
   palette: PaletteDefinition,
   missing: Set<string>,
 ): GraphicsContext {
@@ -153,6 +267,16 @@ export interface CharacterViewDebugOptions {
 export interface CharacterRenderDiagnostics {
   readonly missingPaletteTokens: readonly string[];
   readonly activeLayers: readonly SemanticLayer[];
+  /** Raster pieces currently showing their vector fallback while loading. */
+  readonly pendingRasterAssets: readonly string[];
+  /** Raster pieces showing their vector fallback because loading failed. */
+  readonly failedRasterAssets: readonly string[];
+}
+
+interface PieceSlot {
+  readonly root: Container;
+  readonly vector: Graphics;
+  readonly raster: Sprite;
 }
 
 const LABEL_STYLE = new TextStyle({
@@ -209,8 +333,10 @@ function anchorGroup(name: AnchorName): "body" | "limb" | "item" {
  * Persistent Pixi view for one character.
  *
  * The world/root containers are never recreated when appearance changes. Each
- * animation frame swaps cached GraphicsContext objects on a stable graphics
- * pool, preserving world state and avoiding geometry rebuilds in the render loop.
+ * animation frame swaps cached GraphicsContext/Texture objects on a stable slot
+ * pool, preserving world state and avoiding display-tree rebuilds in the render
+ * loop. Raster pieces fall back to their vector primitives until preloading (or
+ * an automatic lazy load) completes.
  */
 export class VectorCharacterView {
   readonly container = new Container();
@@ -218,10 +344,13 @@ export class VectorCharacterView {
   readonly pieceContainer = new Container();
   readonly anchorContainer = new Container();
 
-  private readonly graphicsPool: Graphics[] = [];
+  private readonly piecePool: PieceSlot[] = [];
   private readonly anchorLabels: Text[] = [];
+  private readonly pendingRasterAssetIds = new Set<string>();
+  private readonly failedRasterAssetIds = new Set<string>();
+  private rasterRevision = 0;
   private lastSignature = "";
-  private lastFrame = "";
+  private lastAnchorKey = "";
   private lastFacing: -1 | 1 = 1;
   private debug: CharacterViewDebugOptions = { layers: false, anchors: false };
 
@@ -237,7 +366,7 @@ export class VectorCharacterView {
     this.anchorContainer.visible = options.anchors;
     if (changed) {
       this.lastSignature = "";
-      this.lastFrame = "";
+      this.lastAnchorKey = "";
     }
   }
 
@@ -245,48 +374,202 @@ export class VectorCharacterView {
     this.container.position.set(x, y);
   }
 
+  /** Changes whenever a raster request starts or settles. */
+  get rasterStateRevision(): number {
+    return this.rasterRevision;
+  }
+
+  /**
+   * Preloads authored bitmaps without mutating character simulation or display
+   * hierarchy. Calling this before the first render avoids fallback frames.
+   */
+  async preload(assets: Iterable<PieceDescriptor>): Promise<void> {
+    const materialized = [...assets];
+    const rasterAssetIds = materialized
+      .filter((asset): asset is RasterPieceDescriptor => asset.kind === "raster")
+      .map(({ id }) => id);
+    rasterAssetIds.forEach((id) => this.pendingRasterAssetIds.add(id));
+    const diagnostics = await preloadRasterAssets(materialized);
+    rasterAssetIds.forEach((id) => this.pendingRasterAssetIds.delete(id));
+    diagnostics.loadedAssetIds.forEach((id) => this.failedRasterAssetIds.delete(id));
+    diagnostics.failedAssetIds.forEach((id) => this.failedRasterAssetIds.add(id));
+    this.rasterRevision += 1;
+    this.lastSignature = "";
+  }
+
+  private getOrCreateSlot(index: number): PieceSlot {
+    const existing = this.piecePool[index];
+    if (existing !== undefined) return existing;
+
+    const root = new Container();
+    root.label = `piece-${index}`;
+    const vector = new Graphics();
+    vector.label = `piece-${index}:vector`;
+    const raster = new Sprite({ texture: Texture.EMPTY });
+    raster.label = `piece-${index}:raster`;
+    raster.visible = false;
+    root.addChild(vector, raster);
+    this.pieceContainer.addChild(root);
+
+    const slot = { root, vector, raster };
+    this.piecePool[index] = slot;
+    return slot;
+  }
+
+  private requestRasterAsset(asset: RasterPieceDescriptor): void {
+    if (
+      this.pendingRasterAssetIds.has(asset.id) ||
+      this.failedRasterAssetIds.has(asset.id)
+    ) {
+      return;
+    }
+
+    this.pendingRasterAssetIds.add(asset.id);
+    this.rasterRevision += 1;
+    void loadRasterTexture(asset)
+      .then(() => {
+        this.pendingRasterAssetIds.delete(asset.id);
+        this.failedRasterAssetIds.delete(asset.id);
+        this.rasterRevision += 1;
+        this.lastSignature = "";
+      })
+      .catch(() => {
+        this.pendingRasterAssetIds.delete(asset.id);
+        this.failedRasterAssetIds.add(asset.id);
+        this.rasterRevision += 1;
+        this.lastSignature = "";
+      });
+  }
+
+  private configureSlot(
+    slot: PieceSlot,
+    asset: PieceDescriptor,
+    palette: PaletteDefinition,
+    missing: Set<string>,
+    label: string,
+    color: number,
+    alpha: number,
+  ): void {
+    const rasterTexture =
+      asset.kind === "raster" ? getLoadedRasterTexture(asset) : undefined;
+    if (asset.kind === "raster" && rasterTexture !== undefined) {
+      const anchor = asset.sourceAnchor ?? { x: 0, y: 0 };
+      slot.raster.texture = rasterTexture;
+      slot.raster.anchor.set(anchor.x, anchor.y);
+      slot.raster.setSize(asset.bounds.width, asset.bounds.height);
+      slot.raster.position.set(
+        asset.bounds.x + asset.bounds.width * anchor.x,
+        asset.bounds.y + asset.bounds.height * anchor.y,
+      );
+      slot.raster.visible = true;
+      slot.raster.alpha = alpha;
+      slot.raster.tint = color;
+      slot.raster.label = `${label}:raster`;
+      slot.vector.visible = false;
+      return;
+    }
+
+    if (asset.kind === "raster") this.requestRasterAsset(asset);
+    slot.vector.context = buildContext(asset, palette, missing);
+    slot.vector.position.set(0, 0);
+    slot.vector.visible = true;
+    slot.vector.alpha = alpha;
+    slot.vector.tint = color;
+    slot.vector.label = `${label}:vector-fallback`;
+    slot.raster.visible = false;
+  }
+
   render(composition: CompositionResult): CharacterRenderDiagnostics {
     const missing = new Set<string>();
     this.lastFacing = composition.facing;
     this.facingContainer.scale.x = composition.facing;
 
-    const signature = `${composition.signature}:${composition.frameId}:${this.debug.layers}`;
+    const presentationCandidate = this.debug.layers
+      ? undefined
+      : composition.presentationPiece;
+    const presentation =
+      presentationCandidate !== undefined &&
+      getLoadedRasterTexture(presentationCandidate) !== undefined
+        ? presentationCandidate
+        : undefined;
+    if (presentationCandidate !== undefined && presentation === undefined) {
+      this.requestRasterAsset(presentationCandidate);
+    }
+    const signature = [
+      composition.signature,
+      composition.frameId,
+      this.debug.layers,
+      presentationCandidate?.id ?? "semantic",
+      presentation === undefined ? "fallback" : "ready",
+    ].join(":");
     if (signature !== this.lastSignature) {
-      composition.drawCommands.forEach((command, index) => {
-        let graphic = this.graphicsPool[index];
-        if (!graphic) {
-          graphic = new Graphics();
-          graphic.label = `piece-${index}`;
-          this.graphicsPool[index] = graphic;
-          this.pieceContainer.addChild(graphic);
-        }
+      let visibleSlotCount = 0;
 
-        graphic.context = buildContext(command.asset, composition.palette, missing);
-        graphic.position.set(
-          command.anchor.x - composition.rootOrigin.x + command.offset.x,
-          command.anchor.y - composition.rootOrigin.y + command.offset.y,
+      if (presentation !== undefined) {
+        const slot = this.getOrCreateSlot(0);
+        const anchor = composition.anchors[presentation.attachmentAnchor];
+        const label = `${presentation.layer}:presentation:${presentation.shapeKey}`;
+        slot.root.position.set(
+          anchor.x - composition.rootOrigin.x + (presentation.offset?.x ?? 0),
+          anchor.y - composition.rootOrigin.y + (presentation.offset?.y ?? 0),
         );
-        graphic.zIndex = command.ordinal;
-        graphic.visible = true;
-        graphic.alpha = this.debug.layers ? 0.91 : 1;
-        graphic.tint = this.debug.layers ? DEBUG_COLORS[command.layer] : 0xffffff;
-        graphic.label = `${command.layer}:${command.providerId}:${command.shapeKey}`;
-      });
+        slot.root.zIndex = 0;
+        slot.root.visible = true;
+        slot.root.label = label;
+        this.configureSlot(
+          slot,
+          presentation,
+          composition.palette,
+          missing,
+          label,
+          0xffffff,
+          1,
+        );
+        visibleSlotCount = 1;
+      } else {
+        composition.drawCommands.forEach((command, index) => {
+          const slot = this.getOrCreateSlot(index);
+          const label = `${command.layer}:${command.providerId}:${command.shapeKey}`;
+          const color = this.debug.layers ? DEBUG_COLORS[command.layer] : 0xffffff;
+          const alpha = this.debug.layers ? 0.91 : 1;
 
-      for (let index = composition.drawCommands.length; index < this.graphicsPool.length; index += 1) {
-        this.graphicsPool[index]!.visible = false;
+          slot.root.position.set(
+            command.anchor.x - composition.rootOrigin.x + command.offset.x,
+            command.anchor.y - composition.rootOrigin.y + command.offset.y,
+          );
+          slot.root.zIndex = command.ordinal;
+          slot.root.visible = true;
+          slot.root.label = label;
+          this.configureSlot(
+            slot,
+            command.asset,
+            composition.palette,
+            missing,
+            label,
+            color,
+            alpha,
+          );
+        });
+        visibleSlotCount = composition.drawCommands.length;
+      }
+
+      for (let index = visibleSlotCount; index < this.piecePool.length; index += 1) {
+        this.piecePool[index]!.root.visible = false;
       }
       this.lastSignature = signature;
     }
 
-    if (this.debug.anchors && composition.frameId !== this.lastFrame) {
+    const anchorKey = `${composition.frameId}:${composition.facing}`;
+    if (this.debug.anchors && anchorKey !== this.lastAnchorKey) {
       this.drawAnchors(composition);
     }
-    this.lastFrame = composition.frameId;
+    this.lastAnchorKey = anchorKey;
 
     return {
       missingPaletteTokens: [...missing].sort(),
       activeLayers: composition.drawCommands.map(({ layer }) => layer),
+      pendingRasterAssets: [...this.pendingRasterAssetIds].sort(),
+      failedRasterAssets: [...this.failedRasterAssetIds].sort(),
     };
   }
 
@@ -341,8 +624,13 @@ export class VectorCharacterView {
   }
 
   destroy(): void {
-    this.graphicsPool.forEach((graphic) => graphic.destroy({ context: false }));
-    this.graphicsPool.length = 0;
+    this.piecePool.forEach((slot) => {
+      slot.root.removeChildren();
+      slot.vector.destroy({ context: false });
+      slot.raster.destroy({ texture: false, textureSource: false });
+      slot.root.destroy();
+    });
+    this.piecePool.length = 0;
     this.anchorLabels.length = 0;
     this.container.destroy({ children: true });
   }
@@ -351,4 +639,19 @@ export class VectorCharacterView {
 export function clearVectorContextCache(): void {
   contextCache.forEach((context) => context.destroy());
   contextCache.clear();
+}
+
+/** Clears view-owned crop textures. Pixi Assets-owned source textures remain cached. */
+export function clearRasterTextureCache(): void {
+  rasterTextureCache.forEach(({ texture, owned }) => {
+    if (owned) texture.destroy(false);
+  });
+  rasterTextureCache.clear();
+  rasterTexturePromises.clear();
+  rasterTextureErrors.clear();
+}
+
+export function clearCharacterPieceCaches(): void {
+  clearVectorContextCache();
+  clearRasterTextureCache();
 }

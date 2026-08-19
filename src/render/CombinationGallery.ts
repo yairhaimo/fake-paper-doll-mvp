@@ -158,7 +158,10 @@ export class CombinationGallery {
   }
 
   render(resolver: GalleryResolver, animationId: AnimationId, frameIndex: number): void {
-    const key = `${animationId}:${frameIndex}`;
+    const rasterRevisions = this.characterViews
+      .map(({ rasterStateRevision }) => rasterStateRevision)
+      .join(",");
+    const key = `${animationId}:${frameIndex}:${rasterRevisions}`;
     if (key === this.lastKey) return;
     GALLERY_COMBINATIONS.forEach((appearance, index) => {
       const composition = resolver(appearance, animationId, frameIndex);

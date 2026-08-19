@@ -21,6 +21,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Install character asset tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes imagemagick
       - run: npm run assets:check
       - run: npm test
       - run: npm run build

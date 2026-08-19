@@ -50,12 +50,12 @@
 
 - [x] Clean install and launch recipe succeeds.
 - [x] Core interaction smoke completes without manual repair.
-- [ ] No uncaught runtime or renderer errors in the fresh raster-era browser run.
+- [x] No uncaught runtime or renderer errors in the fresh raster-era browser run.
 - [x] All 2 × 2 identity/outfit combinations render with the sword.
 - [x] Idle, run, jump, fall, land, and attack are visually distinct.
 - [x] Swap-during-run and swap-during-attack invariants pass.
-- [ ] Deterministic raster-era screenshots and command hashes are stable.
-- [ ] Independent whole-slice critic reports no blocker or high-severity visual gap against the concept sheet.
+- [x] Deterministic raster-era screenshots and command hashes are stable.
+- [x] Independent whole-slice review reports no blocker or high-severity visual gap against the concept sheet.
 
 ## Coupling map
 

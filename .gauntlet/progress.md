@@ -54,4 +54,13 @@
 - Eight dedicated armed/unarmed six-drawing run sheets replace the contact/jump alternation for all four identity/outfit combinations.
 - Startup preload failure no longer aborts the app; semantic fallback, lazy gallery invalidation, and visible raster diagnostics have focused unit coverage.
 - Current evidence: `docs/screenshots/character-quality-board.png` and `docs/screenshots/run-cycle-board.png`, both composed directly from committed runtime atlas cells on a dark background.
-- Stop decision: Still open until the 20-sheet reproducibility check, fresh remote Chromium interaction/visual run, updated raster baselines, and final independent critique pass.
+- Stop decision: Superseded by the final native-scale browser gate below.
+
+## Round 6 — native-scale release gate
+
+- Fresh hosted-Chrome captures verify all four loadouts in idle and run, the full attack contact, semantic layer/anchor debug, and grounded left-facing parity.
+- The first attack gallery capture exposed sword tips being covered by later card backgrounds. The gallery now biases wide attack previews left so every authored weapon silhouette remains visible inside its own card.
+- Verification: 20-sheet deterministic asset check; 33/33 unit tests; production build; 6/6 real-input browser scenarios; five raster-era visual baselines.
+- Performance: 142 warmed samples, p50 18.3 ms, p95 22.7 ms, p99 24.7 ms, worst 25.8 ms, and zero frames over 33/50/100 ms on hosted headless Chrome.
+- Final visual verdict: The shipped character is visibly furry, dimensional, fitted, expressive, and game-readable at native scale. The earlier flat vector presentation survives only as the explicit semantic debug/fallback path.
+- Stop decision: All mandatory vertical-slice gates pass. Remaining work is content expansion, not repair of this foundation.

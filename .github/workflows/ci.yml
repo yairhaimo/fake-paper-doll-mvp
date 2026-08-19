@@ -21,11 +21,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Install character asset tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes imagemagick
-      - run: npm run assets:check
       - run: npm test
       - run: npm run build
       - name: Use runner Chrome for browser verification
@@ -43,3 +38,8 @@ jobs:
             playwright-report
             test-results
           retention-days: 7
+      - name: Install character asset tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes imagemagick
+      - run: npm run assets:check

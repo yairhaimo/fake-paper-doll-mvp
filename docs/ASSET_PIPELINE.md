@@ -1,109 +1,143 @@
 # Asset pipeline
 
-The current pipeline is intentionally code-authored: no PNG, SVG, atlas, or JSON file is loaded for the character at runtime. The [concept sheet](./concept-sheet.png) is a visual reference; executable geometry lives in TypeScript.
+Softwood uses a controlled two-track asset pipeline:
 
-## From pose to pixels
+- the semantic track is TypeScript-authored metadata and anchor-local vector geometry used for deterministic composition, validation, layer debugging, and failure fallback;
+- the presentation track is authored painterly pose art processed into transparent raster atlases for normal gameplay.
 
-1. `canonicalBody.ts` defines a 256 × 256 frame: stable ID, integer duration, root/ground, all required anchors, semantic layer order, and pose tags.
-2. `registries.ts` walks every animation/frame and asks `vectorAssets.ts` to create identity, outfit, and weapon `VectorPieceDescriptor` objects.
-3. Each provider stores a frame-indexed `LayerPieceMap` of semantic layer to stable asset ID. The catalog stores the corresponding descriptors in one asset map.
-4. During verification, tests or tooling call `validateCharacterSystem()` to check the contract, providers, assets, and every selectable composition. Production startup does not invoke this whole-catalog validator; `AppearanceStore` performs its own full-frame check for the selected loadout.
-5. `CompositionResolver` applies explicit hide/replace rules and emits anchor-positioned draw commands.
-6. `VectorCharacterView` turns primitives into cached Pixi `GraphicsContext` objects and reuses a persistent graphics pool.
+This is a vertical-slice compromise. It proves the visual bar and the state-preserving compositor together without pretending that arbitrary future clothes can already combine from independently painted raster layers.
 
-The generated IDs are path-like and pose-specific:
+## Source and generated output
 
-```text
-identity/moss/idle_0/frontArm
-outfit/hoodie/attack_3/frontArm
-weapon/wooden-sword/attack_3/weaponFront
-shared/ground-shadow
+Controlled source sheets live in `art/source/character/v2/`. Runtime output lives in `public/assets/character/v2/`.
+
+The source matrix contains:
+
+- four armed general sheets: Moss/Bramble × Trail/Hoodie;
+- four unarmed general sheets for the same combinations;
+- four equipped attack sheets with six dedicated attack drawings;
+- eight dedicated run sheets: armed and unarmed for every identity/outfit pair.
+
+General sheets contain idle, jump-rise, fall, landing squash, and supporting action keys. Attack and run sheets contain six purpose-authored sequential drawings. Every source is a 3 × 2 sheet on a controlled chroma field.
+
+The generation brief and prompts used to establish the source art are recorded in `art/source/character/v2/README.md`. `docs/concept-sheet.png` is the visual target, not a runtime dependency.
+
+## Deterministic build
+
+Run:
+
+```bash
+npm run assets:build
 ```
 
-`shapeKey` adds provider, layer, frame ID, and pose tag so diagnostics can distinguish authored contours even when their layer is the same.
+The build requires ImageMagick (`magick` or `convert`) and performs these steps for each sheet:
 
-## Authoring contract
+1. remove the chroma field with controlled color/fuzz passes;
+2. downsample the authored sheet with Lanczos filtering;
+3. identify the six large connected foreground components;
+4. isolate each pose rather than trusting guide-cell edges;
+5. repack each pose into a non-overlapping 512 × 512 cell on a transparent 1536 × 1024 atlas;
+6. register each pose to its authored ground line;
+7. remove detached chroma flecks after the real pose components are isolated;
+8. decontaminate transparent/edge RGB so texture filtering cannot recreate a magenta matte;
+9. strip nondeterministic metadata.
 
-All character geometry is authored in canonical space around named anchors, with positive x to the right and positive y down. The fixed root is `(128, 232)` and the ground is `y = 232`. The declared weapon envelope `{ x: 8, y: 8, width: 240, height: 236 }` is the authoring target for complete held-item poses; the current validator does not calculate or enforce envelope containment. World placement and left/right mirroring happen later, so do not bake world coordinates or facing into an asset.
+Component isolation matters because strong run, landing, and sword silhouettes intentionally cross the original guide-cell boundaries. Hard cropping source cells would either cut the character or include a neighboring pose.
 
-A `VectorPieceDescriptor` supplies:
+Verify committed output without overwriting it:
 
-- a globally unique `id` and descriptive `shapeKey`;
-- exactly one semantic `layer`;
-- one `attachmentAnchor` and optional local `offset`;
-- finite local `bounds` coordinates and positive finite width/height;
-- one or more `path`, `ellipse`, `roundRect`, `polygon`, or `line` primitives;
-- palette tokens rather than literal provider colors;
-- optional diagnostic tags.
+```bash
+npm run assets:check
+```
 
-Primitives are local to their attachment anchor. Arm and leg factories derive bent contours from shoulder/elbow/hand or hip/knee/foot anchor triples. Feet, sleeves, body, face, tufts, and weapon silhouettes use pose tags to choose authored geometry. This is discrete pose authoring, not runtime skeletal deformation or tweening.
+The check rebuilds every sheet into a temporary directory and compares SHA-256 bytes. Missing, stale, corrupt, or differently processed output fails the command.
 
-### Author or change a pose
+## Runtime selection
 
-1. Add or edit the frame in `canonicalBody.ts`. Preserve `<animationId>_<frameIndex>` IDs, positive integer `durationTicks`, root `(128, 232)`, and ground `232`.
-2. Provide every required anchor. Move pose anchors rather than the canonical root; set meaningful pose tags for every channel.
-3. Update vector factory logic when the new tag needs a distinct silhouette. Use anchor-relative points and keep bounds conservative.
-4. For `rearArm`, `frontArm`, `rearFoot`, and `frontFoot`, keep the frame ID in `shapeKey` and the `pose-specific` tag. Provider validation requires the frame ID in `shapeKey`; the unit suite separately requires the tag.
-5. Check both facing directions, sword back/front transitions, layer and anchor overlays, all loadouts, and the visual baselines.
+`authoredPoseBundles.ts` maps an `AppearanceSelection`, animation ID, and frame index to a `RasterPieceDescriptor`:
 
-Adding a frame changes required piece-table lengths for every provider. The current builders regenerate all tables from `CANONICAL_BODY`, but every factory must support every layer it declares.
+- armed/unarmed run uses the matching dedicated six-cell run sheet;
+- equipped attack uses the matching six-cell attack sheet;
+- other armed/unarmed animations use the corresponding general sheet;
+- idle keeps four deterministic frame IDs and adds a restrained bottom-pinned breathing scale;
+- jump, fall, and land use matching authored cells;
+- unarmed attack uses an explicit six-frame mapping from unequipped action poses.
+
+All 168 supported selections are enumerated at module initialization: two identities × two outfits × sword on/off × 21 frame IDs. Every descriptor uses a fixed pixel crop and bottom-rooted destination bounds. Facing remains a root-centered horizontal mirror in the renderer.
+
+`GameLab` preloads presentation pieces before the first playable frame. `VectorCharacterView` caches source textures and subtextures, then reuses persistent Pixi `Sprite`/`Graphics` slots. A failed preload is recorded rather than aborting startup; the complete semantic vector command stack renders as fallback. Layer-debug mode deliberately uses that semantic stack even when a painting is ready.
+
+## Semantic authoring contract
+
+The presentation layer does not alter the canonical body:
+
+- logical canvas: 256 × 256;
+- root: `(128, 232)`;
+- ground: `y = 232`;
+- six animations and 21 stable frame IDs;
+- named anchors and explicit per-frame layer order;
+- one canonical anatomy shared by both identities and outfits.
+
+The resolver still applies providers in identity → outfit → weapon order. Equipment declares `supportedLayers`, `hideLayers`, and `replaceLayers`; implicit collisions fail. The result retains every semantic draw command, provider trace, hidden/replaced layer record, palette, anchor, and signature even when normal mode displays a selected full-pose painting.
 
 ## Add an identity
 
-Identity is the base provider. It currently supplies `groundShadow`, tail, ears, both tufts, arms/hands, legs/feet, body, head, and face.
+1. Add the semantic identity definition, palette, and complete frame coverage in `registries.ts` / `vectorAssets.ts`.
+2. Preserve the canonical root, anatomy, frame count, and outfit fit.
+3. Author armed and unarmed general and run sheets for each supported outfit.
+4. Author one equipped attack sheet per supported outfit.
+5. Add filenames and measured registration to `scripts/build-character-assets.mjs`.
+6. Extend the typed matrix in `authoredPoseBundles.ts` and the UI/gallery choices.
+7. Rebuild assets, run exhaustive validation, and review at actual game/gallery scale.
 
-1. Add the ID, display name, and complete `identity.*` palette to `IDENTITY_CONFIG` in `registries.ts`.
-2. Extend the typed identity ID accepted by `createIdentityPiece()` and implement any identity-specific silhouette branches in `vectorAssets.ts`.
-3. Register the identity in `createCharacterCatalog()`. `buildIdentity()` will create one piece map per authored frame and reuse `shared/ground-shadow`.
-4. Add the choice to the inspector and identity cycle list in `GameLab.ts`; update the combination counter and `GALLERY_COMBINATIONS` if the new identity should appear there.
-5. Run the exhaustive validator, unit/end-to-end suites, and visually review every animation with both outfits and sword states.
-
-Keep IDs stable after shipping. Palette values belong to the provider; identity geometry should use `identity.*` or `shared.*` tokens.
+Identity differences may change fur color, face/eyes, ears or horns, tufts, and minor silhouette details. They must not change the clothing-compatible body contract.
 
 ## Add an outfit
 
-An outfit is an `EquipmentDefinition` in the `outfit` registry.
+1. Add an `EquipmentDefinition` with explicit supported, hidden, and replaced semantic layers.
+2. Supply complete semantic frame maps and anchor-local fallback geometry.
+3. Paint armed and unarmed general/run sheets for each supported identity.
+4. Paint one equipped attack sheet per identity.
+5. Add files to the build and extend presentation/UI/gallery matrices.
+6. Inspect shoulders, cuffs, waist, hands, footwear, hood/ear/horn underlaps, sword grip, and both facings.
 
-1. Add its configuration and `outfit.*` palette in `registries.ts`.
-2. Define its `supportedLayers`, `hideLayers`, and `replaceLayers` explicitly. Hiding removes an earlier piece without replacement; replacing authorizes an overwrite only when the new frame map actually supplies that layer.
-3. Extend/generalize `createOutfitPiece()` and `buildOutfit()`. The current implementation has typed `trail | hoodie` branches and a hard-coded supported-layer choice, so adding a third outfit requires updating those branches rather than only inserting a map entry.
-4. Register it, then update inspector/cycle/gallery enumeration.
-5. Confirm full coverage for all 21 frames and review underlaps at shoulders, waist, hands, and feet.
-
-Both current outfits hide identity `body` and replace identity `rearArm`, `frontArm`, `rearFoot`, and `frontFoot`. `trail` supplies six layers; `hoodie` additionally supplies `topBack` and `hoodOrHatFront`. An undeclared collision fails with `IMPLICIT_LAYER_COLLISION`.
+The outfit must visibly follow each pose. Do not create one rigid torso image and rotate sleeve rectangles around it.
 
 ## Add a held item
 
-The current schema calls the held-item slot `weapon`; there is no generic item or accessory registry yet. To add another held item within the existing model:
+The current held-item slot is `weapon` and supports `null` or `wooden-sword`.
 
-1. Give it a stable weapon registry ID, display name, `weapon.*` palette, and an `EquipmentDefinition` with `slot: "weapon"`.
-2. Generalize `buildWeapon()` and `createWeaponPiece()`, which currently emit only `wooden-sword` IDs and geometry.
-3. Supply a piece map for every frame. Declare whether the silhouette belongs on `weaponBack` or `weaponFront`, and replace `frontHand` explicitly if the grip pose is item-specific.
-4. Register the definition and change the current binary sword UI into item selection if more than one weapon is selectable.
-5. Test every pose with and without the item. The current sword uses `weaponFront` for `attack_2` through `attack_4` and `run_3` through `run_5`; all other frames use `weaponBack`. `attack_2` and `attack_4` draw the front weapon last, while `attack_3` draws it immediately before `frontHand` to create the grip sandwich.
-
-Do not put both back and front weapon pieces into one frame unless that is deliberate authored content with non-colliding layer slots.
+1. Add a weapon definition with explicit front-hand replacement and weapon back/front layers.
+2. Provide complete semantic coverage and grip anchors.
+3. Add equipped presentation sheets for every supported identity/outfit combination.
+4. Author dedicated run/attack drawings when the item changes silhouette or hand ownership.
+5. Expand the selector and presentation key rather than treating a second weapon as a boolean sword skin.
 
 ## Validation and review
 
 | Check | Enforced by |
 | --- | --- |
-| 256 × 256 canvas, positive integer tick rate/durations, stable frame IDs, fixed root/ground | `validateContract()` and unit tests |
-| Complete finite anchors and unique known draw layers | `validateContract()` |
-| Unique asset IDs | Registry construction (`addAsset`) |
-| Non-empty primitives, finite bounds coordinates, and positive finite width/height | `validateAssets()` |
-| Provider animation/frame coverage and declared supported layers | `validateProvider()` |
-| Asset existence, layer match, attachment anchor, and draw-order membership | Validator and resolver |
-| Frame ID in pose-critical arm/foot `shapeKey`; `pose-specific` tag | `validateProvider()`; unit metadata test |
-| Non-conflicting, non-duplicate hide/replace rules | `validateProvider()` |
-| Every identity × outfit × weapon on/off × frame composition | `validateCharacterSystem()`; currently 168 resolutions |
-| Swap-time full-frame renderability | `validateAppearanceSelection()` before commit |
-| Silhouette, layering, anchor placement, and facing | Playwright visual scenarios and manual overlays |
+| Source/output reproducibility | `npm run assets:check` |
+| Exactly six major isolated poses per sheet | asset build connected-component check |
+| Raster source, crop, normalized anchor, and bounds validity | `validateAssets()` and unit tests |
+| Complete semantic provider/frame coverage | `validateCharacterSystem()` |
+| All 168 presentation selections | `authored-pose-bundles.test.ts` |
+| Atomic identity/outfit/weapon swaps | appearance, unit, and browser invariant tests |
+| Raster-load failure fallback | renderer tests and semantic command retention |
+| Material, silhouette, clothing fit, and weapon read | native-scale human/critic review |
 
-Run `npm run check` before accepting asset changes. Use `npm run test:visual:update` only when the visual change is intended, then inspect every changed baseline rather than treating snapshot regeneration as approval.
+Run the non-browser checks with:
 
-## Pipeline limitations and next steps
+```bash
+npm run assets:check
+npm test
+npm run build
+```
 
-TypeScript factories provide strong types and deterministic output, but they couple art, runtime code, catalog construction, and UI enumeration. There is no import-time schema check because there is no external import, no automated bounds calculation, no atlas, and no cache eviction. First-use vector triangulation is warmed before the performance measurement.
+Playwright interaction and visual suites additionally require an installed Chromium binary.
 
-A production pipeline should export versioned metadata and vector sources into these same contracts, validate before bundling, calculate bounds, produce a manifest, and derive registry/UI lists from that manifest. Preserve stable provider/frame/asset IDs so semantic traces, saved selections, tests, and future migrations remain meaningful.
+## Known limitation and next step
+
+The current polished sheets are loadout-level presentation bundles. They demonstrate two identities, two outfits, weapon on/off, all required animations, live swapping, and deterministic timing at a serious visual bar. They are not yet a scalable wardrobe atlas because a new outfit requires new full-pose paintings for each identity.
+
+The next production step is to split each accepted painting into pose-specific semantic raster underlaps—rear/front limbs, hands, feet, torso clothing, head/face, back/front fur or hair, and weapon—then export a versioned atlas/metadata manifest. The existing resolver, explicit hide/replace rules, anchors, sprite pool, vector fallback, and tests are designed to remain in place during that migration.

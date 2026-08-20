@@ -1,15 +1,20 @@
 # Softwood Paper Doll Lab
 
-Softwood is a small, playable proof of concept for a deterministic paper-doll character system. A fixed 60 Hz simulation drives authored animation frames; identity, outfit, and held-item choices are resolved into semantic vector pieces without resetting movement or animation time. PixiJS renders those pieces through a persistent character view.
+Softwood is a playable vertical slice for a deterministic hybrid paper-doll character system. A fixed 60 Hz simulation resolves identity, outfit, and held-item choices through explicit semantic layers without resetting movement or animation time. Normal play presents authored painterly pose bundles; layer-debug mode reveals the same composition as anchor-aligned semantic pieces.
 
-![Softwood Paper Doll Lab](docs/screenshots/paper-doll-lab.png)
+![Twelve runtime poses covering both identities and outfits](docs/screenshots/character-quality-board.png)
+
+The board above is cropped directly from the committed runtime atlases. It is not separate concept art.
+
+[Inspect the complete four-loadout, six-frame run board.](docs/screenshots/run-cycle-board.png)
 
 The MVP includes:
 
 - identities `moss` (Moss) and `bramble` (Bramble);
 - outfits `trail` (Trail Set) and `hoodie` (Cloud Hoodie; labelled “Scout hoodie” in the inspector);
 - the optional `wooden-sword` (Wooden Practice Sword);
-- `idle`, `run`, `jump`, `fall`, `land`, and `attack` animations, comprising 21 authored frames;
+- `idle`, `run`, `jump`, `fall`, `land`, and `attack` animations, comprising 21 deterministic frame IDs;
+- twenty reproducibly built raster sheets: armed/unarmed general and six-drawing run sheets for every identity/outfit pair, plus a dedicated six-drawing equipped attack sequence for each pair;
 - eight selectable loadouts. The compatibility gallery displays the four identity/outfit combinations with the sword equipped;
 - layer, anchor, timeline, frame-step, and frame-time diagnostics.
 
@@ -36,6 +41,8 @@ npm run preview
 | `npm run dev` | Start the Vite development server on port 4173. |
 | `npm run build` | Type-check with `tsc -b`, then create the Vite production bundle. |
 | `npm run preview` | Serve the production build on port 4173. |
+| `npm run assets:build` | Rebuild the 12 transparent runtime atlases from the controlled source sheets (requires ImageMagick). |
+| `npm run assets:check` | Rebuild to a temporary directory and verify that every committed atlas is byte-identical. |
 | `npm test` | Run the Vitest unit suites once. |
 | `npm run test:watch` | Run Vitest in watch mode. |
 | `npm run test:e2e` | Run the Playwright interaction and frame-time suites. |
@@ -97,7 +104,8 @@ Supported parameters are `animation=<id>`, positive integer `tick=<n>`, `gallery
 
 | Layer | What it guards |
 | --- | --- |
-| Unit | Integer animation timing, semantic composition, stable signatures, atomic swaps, schema validation, and pose-specific geometry metadata. |
+| Asset build | Deterministically rebuilds all 12 packed atlases and rejects stale output. |
+| Unit | Integer animation timing, semantic composition, 168 authored-presentation selections, stable signatures, atomic swaps, raster schema validation, and pose metadata. |
 | End to end | Error-free boot, swap preservation during run/attack, debug controls, gallery/frame stepping, and a headless frame-time regression gate. |
 | Visual | Gallery poses for `idle`, `run`, and `attack`; attack layer/anchor alignment; and left-facing grounded-root behavior. |
 | Browser smoke | Canvas/content/error checks plus a serialized harness snapshot and screenshot. |
@@ -106,6 +114,6 @@ The default validator exhaustively resolves 168 combinations: 2 identities × 2 
 
 ## Known limits and next steps
 
-This is deliberately a vertical slice. Vector geometry, palettes, registry membership, UI choices, and gallery entries are compiled into TypeScript; there is no external asset loader or editor export step. Frames are discrete rather than interpolated, only one outfit and one optional weapon slot exist, and the semantic signature is not a raster or full geometry digest. The headless performance test is a regression gate under SwiftShader, not target-device certification.
+This is deliberately a vertical slice. The final paintings are full-pose presentation bundles selected by the semantic composition, not independently painted raster files for all 18 visible paper-doll layers. The semantic layer stack remains authoritative for rules, traces, hide/replace diagnostics, anchors, and vector fallback, but adding arbitrary wardrobe content still requires authoring matching presentation sheets. Frames are discrete, only one outfit and one optional weapon slot exist, and the semantic signature is not a pixel digest.
 
-The most useful next steps are to generate versioned metadata from an authoring source, derive UI choices from registries, add a validation CLI and migration rules, broaden equipment slots and visual coverage, and profile the persistent renderer on target hardware.
+The most useful next step is to split each polished key pose into painted semantic underlaps (head/face, front and rear limbs, torso clothing, hands, feet, hair/fur, and weapon) and pack them into a versioned atlas manifest. That preserves the current visual bar while allowing new outfits to combine without a pre-authored full-pose bundle. Registry-driven UI, schema migration, broader slots, and target-device profiling follow after that boundary is stable.

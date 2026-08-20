@@ -5,6 +5,7 @@ import {
   CANONICAL_BODY,
   DEFAULT_CHARACTER_CATALOG,
   assertValidCharacterSystem,
+  type RasterPieceDescriptor,
   validateCharacterSystem,
 } from '../../src/character';
 
@@ -77,5 +78,61 @@ describe('character-system validation', () => {
         expect(frame.groundY).toBe(232);
       }
     }
+  });
+
+  it('accepts a raster-backed piece with a source crop and vector fallback', () => {
+    const assets = new Map(DEFAULT_CHARACTER_CATALOG.assets);
+    const assetId = DEFAULT_CHARACTER_CATALOG.identities
+      .get('moss')!
+      .pieces.idle[0]!.head!;
+    const original = assets.get(assetId)!;
+    const rasterAsset: RasterPieceDescriptor = {
+      ...original,
+      kind: 'raster',
+      source: '/assets/character/moss-idle.png',
+      sourceRect: { x: 128, y: 0, width: 128, height: 128 },
+      sourceAnchor: { x: 0.5, y: 0.75 },
+    };
+    assets.set(assetId, rasterAsset);
+
+    const report = validateCharacterSystem({
+      ...DEFAULT_CHARACTER_CATALOG,
+      assets,
+    });
+
+    expect(report.valid).toBe(true);
+    expect(report.issues).toEqual([]);
+  });
+
+  it('rejects malformed raster metadata before runtime loading', () => {
+    const assets = new Map(DEFAULT_CHARACTER_CATALOG.assets);
+    const assetId = DEFAULT_CHARACTER_CATALOG.identities
+      .get('moss')!
+      .pieces.idle[0]!.head!;
+    const original = assets.get(assetId)!;
+    const rasterAsset: RasterPieceDescriptor = {
+      ...original,
+      kind: 'raster',
+      source: ' ',
+      sourceRect: { x: -1, y: 0, width: 0, height: 128 },
+      sourceAnchor: { x: 1.25, y: Number.NaN },
+      primitives: [],
+    };
+    assets.set(assetId, rasterAsset);
+
+    const report = validateCharacterSystem({
+      ...DEFAULT_CHARACTER_CATALOG,
+      assets,
+    });
+    const codes = report.issues.map(({ code }) => code);
+
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        'EMPTY_RASTER_FALLBACK',
+        'INVALID_RASTER_SOURCE',
+        'INVALID_RASTER_SOURCE_RECT',
+        'INVALID_RASTER_SOURCE_ANCHOR',
+      ]),
+    );
   });
 });

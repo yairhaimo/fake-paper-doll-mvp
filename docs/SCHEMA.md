@@ -8,12 +8,14 @@ The runtime schema is structured, readonly TypeScript metadata rather than a JSO
 | --- | --- |
 | `CanonicalBodyContract` | Logical canvas, tick rate, root/ground, bounds envelopes, required anchors, layer order, and animations. |
 | `AnimationDefinition` / `FrameDefinition` | Loop policy plus stable frame ID, integer duration, anchors, pose tags, draw order, and optional frame hides. |
-| `VectorPieceDescriptor` | One anchor-local vector asset with semantic layer, bounds, primitives, and tags. |
+| `VectorPieceDescriptor` | One anchor-local vector asset with semantic layer, bounds, fallback primitives, and tags. |
+| `RasterPieceDescriptor` | A source image/crop mapped into destination bounds, with optional normalized source anchor and required vector fallback field. |
+| `PieceDescriptor` | Discriminated union of vector and raster descriptors. |
 | `IdentityDefinition` | Base provider palette, supported layers, full animation coverage, and frame-indexed piece maps. |
 | `EquipmentDefinition` | Outfit or weapon provider plus explicit hide/replace rules. |
 | `CharacterCatalog` | Readonly maps for assets, identities, outfits, and weapons. |
 | `AppearanceSelection` | `identityId`, `outfitId`, and nullable `weaponId`; snapshots add `revision`. |
-| `CompositionResult` | Palette, ordered draw commands, hidden/replaced layers, semantic trace, and signature for one frame/facing. |
+| `CompositionResult` | Appearance, palette, ordered semantic draw commands, hidden/replaced layers, trace/signature, and optional authored presentation piece for one frame/facing. |
 | `ValidationReport` | Valid flag, structured issues, and exhaustive composition count. |
 
 ## Stable enumerations
@@ -120,7 +122,13 @@ The following is an intentionally abridged projection of real `moss` / `idle_0` 
 }
 ```
 
-The actual `FrameDefinition.anchors` and `poses` are complete records. The actual asset also has at least one vector primitive.
+The actual `FrameDefinition.anchors` and `poses` are complete records. Semantic catalog assets have vector primitives. Authored full-pose presentation descriptors are raster assets outside the semantic provider maps and may use an empty primitive list because the renderer falls back to the composition's complete semantic command stack.
+
+## Raster presentation descriptors
+
+A raster descriptor adds `kind: "raster"`, a public `source` URL, optional pixel `sourceRect`, optional normalized `sourceAnchor`, and destination `bounds`. The current presentation adapter uses fixed 512 × 512 source cells, attaches them to `root`, and bottom-centers the destination bounds on that anchor. `authoredPoseBundles.ts` enumerates 168 deterministic descriptors: two identities × two outfits × sword on/off × 21 frames.
+
+The presentation descriptor is additive metadata. It does not replace `drawCommands`, `trace`, `hiddenLayers`, `replacedLayers`, or the semantic signature. Custom catalog combinations with no presentation mapping intentionally keep rendering through semantic pieces.
 
 ## Hide, replace, and draw semantics
 
@@ -155,6 +163,7 @@ The signature is intentionally semantic. It is not a pixel hash and does not sep
 | Body contract | `INVALID_LOGICAL_CANVAS`, `INVALID_TICK_RATE`, `UNSTABLE_FRAME_ID`, `INVALID_FRAME_DURATION`, `ROOT_CONTRACT_BROKEN`, `INVALID_ANCHOR`, duplicate/unknown draw layers |
 | Provider tables | Missing animation coverage, frame-count mismatch, undeclared or duplicate supported layers |
 | Assets | Registry key mismatch, missing/empty asset, invalid bounds, layer mismatch, missing attachment anchor |
+| Raster assets | Empty source URL, invalid crop, invalid normalized source anchor, non-finite destination bounds |
 | Pose geometry | `NON_POSE_SPECIFIC_SHAPE` for required arm/foot contours |
 | Equipment rules | Conflicting or duplicate hide/replace declarations |
 | Composition | Unknown IDs, unsupported animation, missing frame/asset/anchor, implicit collision, or layer absent from draw order |

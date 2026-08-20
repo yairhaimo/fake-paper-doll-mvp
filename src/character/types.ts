@@ -2,7 +2,9 @@
  * Pure data types for the fake paper-doll runtime.
  *
  * The core deliberately knows nothing about PixiJS or the DOM. A renderer only
- * needs to consume CompositionResult.drawCommands and the vector primitives.
+ * needs to consume CompositionResult.drawCommands and the authored piece
+ * descriptors. Pieces can be vector-authored or raster-backed with a vector
+ * fallback; neither representation leaks into simulation state.
  */
 
 export const ANIMATION_IDS = [
@@ -179,7 +181,7 @@ export type VectorPrimitive =
       readonly to: Point;
     } & VectorPaint);
 
-export interface VectorPieceDescriptor {
+interface PieceDescriptorBase {
   readonly id: string;
   /** Describes the authored contour, and is useful in debug tooling. */
   readonly shapeKey: string;
@@ -187,9 +189,37 @@ export interface VectorPieceDescriptor {
   readonly attachmentAnchor: AnchorName;
   readonly offset?: Point;
   readonly bounds: Bounds;
-  readonly primitives: readonly VectorPrimitive[];
   readonly tags?: readonly string[];
 }
+
+export interface VectorPieceDescriptor extends PieceDescriptorBase {
+  /** Omitted by legacy/authored vector registries for backwards compatibility. */
+  readonly kind?: 'vector';
+  readonly primitives: readonly VectorPrimitive[];
+}
+
+/**
+ * An authored bitmap piece that participates in the same semantic layer and
+ * anchor contract as a vector piece.
+ *
+ * `source` is a Pixi Assets URL or alias. `sourceRect`, when present, crops a
+ * frame from that texture in source pixels. `sourceAnchor` is normalized to the
+ * cropped frame (0..1). `bounds` is the destination rectangle, in canonical
+ * character units and relative to `attachmentAnchor` plus `offset`.
+ *
+ * Raster pieces retain vector primitives as a deterministic fallback while the
+ * source is loading or if loading fails. This also keeps debug and headless
+ * validation useful without needing a GPU or image decoder.
+ */
+export interface RasterPieceDescriptor extends PieceDescriptorBase {
+  readonly kind: 'raster';
+  readonly source: string;
+  readonly sourceRect?: Bounds;
+  readonly sourceAnchor?: Point;
+  readonly primitives: readonly VectorPrimitive[];
+}
+
+export type PieceDescriptor = VectorPieceDescriptor | RasterPieceDescriptor;
 
 export type LayerPieceMap = Readonly<Partial<Record<SemanticLayer, string>>>;
 export type AnimationPieceTable = Readonly<
@@ -225,7 +255,7 @@ export interface EquipmentDefinition {
 }
 
 export interface CharacterCatalog {
-  readonly assets: ReadonlyMap<string, VectorPieceDescriptor>;
+  readonly assets: ReadonlyMap<string, PieceDescriptor>;
   readonly identities: ReadonlyMap<string, IdentityDefinition>;
   readonly outfits: ReadonlyMap<string, EquipmentDefinition>;
   readonly weapons: ReadonlyMap<string, EquipmentDefinition>;
@@ -253,10 +283,12 @@ export interface DrawCommand {
   readonly anchorName: AnchorName;
   readonly anchor: Point;
   readonly offset: Point;
-  readonly asset: VectorPieceDescriptor;
+  readonly asset: PieceDescriptor;
 }
 
 export interface CompositionResult {
+  /** Immutable selection used to resolve this frame. */
+  readonly appearance: AppearanceSelection;
   readonly animationId: AnimationId;
   readonly frameIndex: number;
   readonly frameId: string;
@@ -269,6 +301,11 @@ export interface CompositionResult {
   readonly hiddenLayers: readonly SemanticLayer[];
   readonly replacedLayers: readonly SemanticLayer[];
   readonly trace: readonly string[];
+  /**
+   * Optional authored full-pose painting used by the presentation renderer.
+   * Semantic draw commands remain authoritative for debugging and validation.
+   */
+  readonly presentationPiece?: RasterPieceDescriptor;
   /** Stable FNV-1a digest of the semantic composition, not raster pixels. */
   readonly signature: string;
 }

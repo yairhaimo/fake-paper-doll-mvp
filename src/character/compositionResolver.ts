@@ -1,4 +1,5 @@
 import { getFrame } from './canonicalBody';
+import { resolveAuthoredPresentationPiece } from './authoredPoseBundles';
 import { DEFAULT_CHARACTER_CATALOG, SHARED_PALETTE } from './registries';
 import {
   SEMANTIC_LAYERS,
@@ -289,8 +290,19 @@ export class CompositionResolver {
       `replaced=${replacedLayers.join(',')}`,
       ...trace,
     ].join('|');
+    const appearance = Object.freeze({
+      identityId: identity.id,
+      outfitId: outfit.id,
+      weaponId: weapon?.id ?? null,
+    });
+    const presentationPiece = resolveAuthoredPresentationPiece(
+      appearance,
+      request.animationId,
+      request.frameIndex,
+    );
 
     return Object.freeze({
+      appearance,
       animationId: request.animationId,
       frameIndex: request.frameIndex,
       frameId: frame.id,
@@ -303,6 +315,7 @@ export class CompositionResolver {
       hiddenLayers,
       replacedLayers,
       trace,
+      ...(presentationPiece === undefined ? {} : { presentationPiece }),
       signature: fnv1a(signatureSource),
     });
   }

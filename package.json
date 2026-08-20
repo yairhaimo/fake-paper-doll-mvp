@@ -7,13 +7,15 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
+    "assets:build": "node scripts/build-character-assets.mjs",
+    "assets:check": "node scripts/build-character-assets.mjs --check",
     "test": "vitest run tests/unit",
     "test:watch": "vitest",
     "test:e2e": "playwright test tests/e2e",
     "test:visual": "playwright test tests/visual",
     "test:visual:update": "playwright test tests/visual --update-snapshots",
     "verify:browser": "node scripts/browser-smoke.mjs",
-    "check": "npm run test && npm run build && npm run test:e2e && npm run test:visual"
+    "check": "npm run assets:check && npm run test && npm run build && npm run test:e2e && npm run test:visual"
   },
   "dependencies": {
     "pixi.js": "^8.19.0"

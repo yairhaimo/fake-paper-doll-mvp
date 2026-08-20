@@ -58,6 +58,7 @@ function displayName(value: string): string {
 export class CombinationGallery {
   readonly container = new Container();
   private readonly characterViews: VectorCharacterView[] = [];
+  private readonly characterHomeX: number[] = [];
   private lastKey = "";
 
   constructor() {
@@ -128,7 +129,9 @@ export class CombinationGallery {
 
       const view = new VectorCharacterView();
       view.container.scale.set(0.8);
-      view.setWorldPosition(x + cardWidth / 2, 386);
+      const homeX = x + cardWidth / 2;
+      this.characterHomeX.push(homeX);
+      view.setWorldPosition(homeX, 386);
       this.characterViews.push(view);
       this.container.addChild(view.container);
 
@@ -158,11 +161,22 @@ export class CombinationGallery {
   }
 
   render(resolver: GalleryResolver, animationId: AnimationId, frameIndex: number): void {
-    const key = `${animationId}:${frameIndex}`;
+    const rasterRevisions = this.characterViews
+      .map(({ rasterStateRevision }) => rasterStateRevision)
+      .join(",");
+    const key = `${animationId}:${frameIndex}:${rasterRevisions}`;
     if (key === this.lastKey) return;
     GALLERY_COMBINATIONS.forEach((appearance, index) => {
       const composition = resolver(appearance, animationId, frameIndex);
-      this.characterViews[index]!.render(composition);
+      const view = this.characterViews[index]!;
+      // The authored attack is intentionally wider than idle/run. Bias the
+      // gallery preview left so the sword tip stays inside its own card and is
+      // never covered by the following card's background.
+      view.setWorldPosition(
+        this.characterHomeX[index]! + (animationId === "attack" ? -30 : 0),
+        386,
+      );
+      view.render(composition);
     });
     this.lastKey = key;
   }

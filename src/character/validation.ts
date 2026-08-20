@@ -222,7 +222,13 @@ function validateAssets(catalog: CharacterCatalog, issues: ValidationIssue[]): v
       issue(issues, 'ASSET_KEY_MISMATCH', `Asset registry key ${key} != ${asset.id}`);
     }
     if (asset.primitives.length === 0) {
-      issue(issues, 'EMPTY_VECTOR_ASSET', `${asset.id} has no vector primitives`);
+      issue(
+        issues,
+        asset.kind === 'raster' ? 'EMPTY_RASTER_FALLBACK' : 'EMPTY_VECTOR_ASSET',
+        asset.kind === 'raster'
+          ? `${asset.id} has no vector fallback primitives`
+          : `${asset.id} has no vector primitives`,
+      );
     }
     if (
       !finite(asset.bounds.x) ||
@@ -233,6 +239,48 @@ function validateAssets(catalog: CharacterCatalog, issues: ValidationIssue[]): v
       asset.bounds.height <= 0
     ) {
       issue(issues, 'INVALID_ASSET_BOUNDS', `${asset.id} has invalid local bounds`);
+    }
+
+    if (asset.kind !== 'raster') continue;
+
+    if (asset.source.trim().length === 0) {
+      issue(issues, 'INVALID_RASTER_SOURCE', `${asset.id} has an empty raster source`);
+    }
+
+    const sourceRect = asset.sourceRect;
+    if (
+      sourceRect !== undefined &&
+      (!finite(sourceRect.x) ||
+        !finite(sourceRect.y) ||
+        !finite(sourceRect.width) ||
+        !finite(sourceRect.height) ||
+        sourceRect.x < 0 ||
+        sourceRect.y < 0 ||
+        sourceRect.width <= 0 ||
+        sourceRect.height <= 0)
+    ) {
+      issue(
+        issues,
+        'INVALID_RASTER_SOURCE_RECT',
+        `${asset.id} has an invalid raster source crop`,
+      );
+    }
+
+    const sourceAnchor = asset.sourceAnchor;
+    if (
+      sourceAnchor !== undefined &&
+      (!finite(sourceAnchor.x) ||
+        !finite(sourceAnchor.y) ||
+        sourceAnchor.x < 0 ||
+        sourceAnchor.x > 1 ||
+        sourceAnchor.y < 0 ||
+        sourceAnchor.y > 1)
+    ) {
+      issue(
+        issues,
+        'INVALID_RASTER_SOURCE_ANCHOR',
+        `${asset.id} has a raster source anchor outside the normalized 0..1 range`,
+      );
     }
   }
 }

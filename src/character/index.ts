@@ -7,3 +7,4 @@ export * from './registries';
 export * from './compositionResolver';
 export * from './appearanceStore';
 export * from './validation';
+export * from './authoredPoseBundles';

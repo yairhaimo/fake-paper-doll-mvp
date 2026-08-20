@@ -35,3 +35,32 @@
 - Independent verdict: `CANDIDATE_WINS`.
 - Final critic gate: No blocker or high-severity defect remains; no visible state or facing regression.
 - Stop decision: All mandatory acceptance gates pass. Remaining gains (stronger attack arc and more silhouette fur breaks) are scoped follow-up polish rather than vertical-slice blockers.
+
+## Round 4 — user rejection and art-direction reset
+
+- User evidence: `upload/0242d73b-0b98-40fb-84ec-c522502c0858.png` was rejected as not looking like a playable game character and not matching `docs/concept-sheet.png`.
+- Honest re-baseline: The deterministic compositor, swaps, tests, and tooling remain reusable. The solid-fill code-vector presentation is not capable of reaching the required furry, painterly material bar without becoming an illustration system.
+- Independent audits: Both visual and renderer audits recommend preserving simulation/composition while moving final presentation to authored raster poses with a persistent Pixi sprite backend and vector fallback for semantic debugging.
+- Gold-pose result: Moss + Trail idle, run contact, jump, fall, land, and attack contact now use visibly furry contours, three-value painted volume, fitted cloth, detailed leather footwear, expressive eyes, and a faceted wooden sword.
+- Production content: Equipped and unequipped 3 × 2 sheets exist for all four identity/outfit combinations; a dedicated six-drawing equipped attack sequence exists for all four combinations.
+- Largest remaining gap: Integrate the authored sheets into the live resolver/view, capture native-scale evidence, and run fresh blind critic and regression loops.
+- Stop decision: Reopened. The earlier `CANDIDATE_WINS` verdict is superseded by direct user rejection and cannot be used as acceptance evidence.
+
+## Round 5 — authored raster rebuild and strict re-audit
+
+- Normal play now selects painterly authored pose bundles while the deterministic semantic stack remains available for layer debug and fallback.
+- First independent review rejected the raster candidate for a one-pixel magenta matte and a two-key run mapping that reused the jump pose.
+- The build now neutralizes hidden/edge chroma RGB without trimming alpha. Objective dark-background audit reduced detected Moss fringe pixels from 16,075 to 0 and Bramble from 25,821 to 2.
+- Eight dedicated armed/unarmed six-drawing run sheets replace the contact/jump alternation for all four identity/outfit combinations.
+- Startup preload failure no longer aborts the app; semantic fallback, lazy gallery invalidation, and visible raster diagnostics have focused unit coverage.
+- Current evidence: `docs/screenshots/character-quality-board.png` and `docs/screenshots/run-cycle-board.png`, both composed directly from committed runtime atlas cells on a dark background.
+- Stop decision: Superseded by the final native-scale browser gate below.
+
+## Round 6 — native-scale release gate
+
+- Fresh hosted-Chrome captures verify all four loadouts in idle and run, the full attack contact, semantic layer/anchor debug, and grounded left-facing parity.
+- The first attack gallery capture exposed sword tips being covered by later card backgrounds. The gallery now biases wide attack previews left so every authored weapon silhouette remains visible inside its own card.
+- Verification: 20-sheet deterministic asset check; 33/33 unit tests; production build; 6/6 real-input browser scenarios; five raster-era visual baselines.
+- Performance: 142 warmed samples, p50 18.3 ms, p95 22.7 ms, p99 24.7 ms, worst 25.8 ms, and zero frames over 33/50/100 ms on hosted headless Chrome.
+- Final visual verdict: The shipped character is visibly furry, dimensional, fitted, expressive, and game-readable at native scale. The earlier flat vector presentation survives only as the explicit semantic debug/fallback path.
+- Stop decision: All mandatory vertical-slice gates pass. Remaining work is content expansion, not repair of this foundation.

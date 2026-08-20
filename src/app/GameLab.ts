@@ -1,6 +1,7 @@
 import { Application, Container } from "pixi.js";
 import { AnimationPlayer, type AnimationPlayerSnapshot } from "../character/animationPlayer";
 import { AppearanceStore, type AppearancePatch } from "../character/appearanceStore";
+import { AUTHORED_PRESENTATION_PIECES } from "../character/authoredPoseBundles";
 import { CANONICAL_BODY, getAnimation } from "../character/canonicalBody";
 import { CompositionResolver } from "../character/compositionResolver";
 import { DEFAULT_CHARACTER_CATALOG } from "../character/registries";
@@ -20,7 +21,10 @@ import {
 } from "../character/types";
 import { InputController } from "../input/InputController";
 import { CombinationGallery } from "../render/CombinationGallery";
-import { VectorCharacterView } from "../render/VectorCharacterView";
+import {
+  VectorCharacterView,
+  type CharacterRenderDiagnostics,
+} from "../render/VectorCharacterView";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH, WorldBackdrop } from "../render/WorldBackdrop";
 import { FrameMetrics, type FrameMetricSnapshot } from "../testing/FrameMetrics";
 import { setPressed, type LabElements } from "../ui/layout";
@@ -150,6 +154,7 @@ export class GameLab {
   private lastCompositionKey = "";
   private lastBackdropTick = -1;
   private lastTelemetryTick = -1;
+  private lastDiagnosticKey = "";
   private toastTimer: number | undefined;
 
   private constructor(private readonly ui: LabElements) {}
@@ -166,10 +171,19 @@ export class GameLab {
       backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
+      // Visual regression tests read the rendered canvas directly. Retaining
+      // the buffer only in explicit test mode keeps captures deterministic
+      // without changing the production renderer's memory behavior.
+      preserveDrawingBuffer:
+        new URLSearchParams(window.location.search).get("testMode") === "1",
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       preference: "webgl",
       powerPreference: "high-performance",
     });
+    await this.playerView.preload([
+      ...DEFAULT_CHARACTER_CATALOG.assets.values(),
+      ...AUTHORED_PRESENTATION_PIECES,
+    ]);
     this.app.canvas.setAttribute("aria-label", "Playable fuzzy monster paper-doll demo");
     this.app.canvas.setAttribute("role", "img");
     this.ui.canvasMount.appendChild(this.app.canvas);
@@ -403,6 +417,11 @@ export class GameLab {
     this.playerView.setWorldPosition(this.simulation.position.x, this.simulation.position.y);
     this.playerView.setDebug({ layers: this.layerDebug, anchors: this.anchorDebug });
     const diagnostics = this.playerView.render(this.composition);
+    const diagnosticKey = [
+      diagnostics.missingPaletteTokens.join(","),
+      diagnostics.pendingRasterAssets.join(","),
+      diagnostics.failedRasterAssets.join(","),
+    ].join("|");
     this.playerView.container.visible = !this.galleryVisible;
 
     this.gallery.setVisible(this.galleryVisible);
@@ -418,14 +437,16 @@ export class GameLab {
     if (
       compositionChanged ||
       this.lastUiKey === "" ||
+      diagnosticKey !== this.lastDiagnosticKey ||
       this.simulation.tick - this.lastTelemetryTick >= 3
     ) {
-      this.updateUi(diagnostics.missingPaletteTokens);
+      this.updateUi(diagnostics);
+      this.lastDiagnosticKey = diagnosticKey;
       this.lastTelemetryTick = this.simulation.tick;
     }
   }
 
-  private updateUi(missingPaletteTokens: readonly string[]): void {
+  private updateUi(diagnostics: CharacterRenderDiagnostics): void {
     const animation = this.animation.snapshot();
     const frameCount = getAnimation(animation.animationId).frames.length;
     this.ui.statusAnimation.textContent = humanAnimation(animation.animationId);
@@ -436,7 +457,11 @@ export class GameLab {
     this.ui.statusPosition.textContent = `${this.simulation.position.x.toFixed(1)}, ${this.simulation.position.y.toFixed(1)}`;
     this.ui.statusVelocity.textContent = `${this.simulation.velocity.x.toFixed(1)}, ${this.simulation.velocity.y.toFixed(1)}`;
     this.ui.combinationCount.textContent = String(this.combinationIndex());
-    this.ui.debugReadout.textContent = `${missingPaletteTokens.length} missing palette tokens · 0 unresolved anchors`;
+    this.ui.debugReadout.textContent = [
+      `${diagnostics.missingPaletteTokens.length} missing palette tokens`,
+      `${diagnostics.pendingRasterAssets.length} raster assets loading`,
+      `${diagnostics.failedRasterAssets.length} raster asset failures`,
+    ].join(" · ");
 
     const uiKey = [
       this.appearance.snapshot.revision,
